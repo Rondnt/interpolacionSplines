@@ -5,9 +5,9 @@ Encadena los módulos del núcleo en el mismo orden que el modelo matemático:
 1. Parametrización:   t_nodes = parametrize(P)
 2. Spline:            Hermite (tangentes cardinales) o cúbico natural/sujeto
 3. Muestreo:          N puntos por tramo, u ∈ [0, 1), más el último nodo
-4. Cinemática:        ‖p'‖, ‖p''‖ y κ; los picos de κ entre muestras se refinan (sección áurea)
+4. Cinemática:        ‖p'‖, ‖p''‖ y κ; máximo de κ en cada intervalo entre muestras (sección áurea)
 5. Longitud de arco:  s(t) con Simpson compuesto
-6. Velocidad:         v_max por curvatura (incluyendo los picos) y perfil con límite longitudinal
+6. Velocidad:         v_max por curvatura (válido en toda la curva) y perfil con límite longitudinal
 7. Tiempo:            t(s) acumulado y tiempo total
 
 La usan la API (``api/main.py``) y el notebook del informe.
@@ -56,7 +56,7 @@ class TrajectoryResult:
     speed: np.ndarray         # (N,)  ‖p'(t)‖ (paramétrica)
     acceleration: np.ndarray  # (N,)  ‖p''(t)‖ (paramétrica)
     curvature: np.ndarray     # (N,)  κ [1/m] en las muestras
-    v_max: np.ndarray         # (N,)  límite por curvatura [m/s] (considera los picos entre muestras)
+    v_max: np.ndarray         # (N,)  límite por curvatura [m/s], válido también entre muestras
     v_profile: np.ndarray     # (N,)  perfil factible [m/s]
     time: np.ndarray          # (N,)  tiempo acumulado [s]
     tangents: np.ndarray      # (n+1, 2) tangentes en los nodos
@@ -191,16 +191,15 @@ def compute_trajectory(
     accel = kinematics.acceleration_norm(d2)
     kappa = kinematics.curvature(d1, d2)
 
-    # Picos de κ entre muestras: se ubican con sección áurea y se imponen en las dos
-    # muestras que los rodean. Así v (interpolada linealmente entre muestras) respeta
-    # a_lat también en el pico, aunque este sea más angosto que la malla.
-    t_peak, kappa_peak = kinematics.curvature_peaks(spline.curvature, t, kappa)
-    j = np.clip(np.searchsorted(t, t_peak, side="right") - 1, 0, t.shape[0] - 2)
-    kappa_env = kappa.copy()
-    np.maximum.at(kappa_env, j, kappa_peak)
-    np.maximum.at(kappa_env, j + 1, kappa_peak)
+    # Límite lateral garantizado en toda la curva, no solo en las muestras:
+    #   κ̂_j = máx κ en [t_j, t_{j+1}]   y   κ_env,i = máx(κ̂_{i−1}, κ̂_i).
+    # Si v_i y v_{i+1} cumplen v ≤ √(a_lat/κ̂_i), cualquier interpolación lineal entre
+    # ellas (de v o de v²) también lo cumple en todo el intervalo, porque nunca supera
+    # al mayor de sus extremos.
+    kappa_int = kinematics.interval_max_curvature(spline.curvature, t, kappa)
+    kappa_env = np.maximum(np.concatenate((kappa_int[:1], kappa_int)), np.concatenate((kappa_int, kappa_int[-1:])))
 
-    s = arc_length.cumulative_arc_length(t, spline.speed)
+    s = arc_length.cumulative_arc_length(t, spline.speed, n_sub=8)
     v_max = velocity_profile.curvature_speed_limit(kappa_env, v_cruise, a_lat_max)
     v = velocity_profile.longitudinal_limit(v_max, s, a_long_max)
     time = velocity_profile.cumulative_time(s, v, a_long_max)

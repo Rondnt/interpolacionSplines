@@ -74,3 +74,23 @@ def test_tension_1_no_produce_nan():
         assert np.all(np.isfinite(arr))
     # el dron se detiene (casi) en cada esquina
     assert np.all(res.v_profile[res.knots_index] < 1e-2)
+
+
+@pytest.mark.parametrize("method", ["hermite", "natural"])
+@pytest.mark.parametrize("seed", range(6))
+def test_limite_lateral_tambien_entre_muestras(method, seed):
+    """Con v interpolada linealmente en s, v²κ ≤ a_lat en una malla 40 veces más fina."""
+    from core import arc_length
+
+    rng = np.random.default_rng(seed)
+    while True:
+        P = np.c_[rng.uniform(0, 24, 7), rng.uniform(0, 14, 7)]
+        if np.linalg.norm(np.diff(P, axis=0), axis=1).min() > 0.5:
+            break
+    res = trajectory.compute_trajectory(P, method, 0.0, "centripetal", samples_per_segment=50, **LIMITS)
+    sp = trajectory.build_spline(P, method, 0.0, "centripetal")
+    t_fine, _ = trajectory.sample_parameters(sp.t_nodes, 2000)
+    s_fine = arc_length.cumulative_arc_length(t_fine, sp.speed)
+    v_fine = np.interp(s_fine, res.s, res.v_profile)
+    a_lat = v_fine**2 * sp.curvature(t_fine)
+    assert a_lat.max() <= LIMITS["a_lat_max"] * (1 + 1e-6)

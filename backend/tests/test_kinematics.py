@@ -73,14 +73,18 @@ def test_aceleraciones_fisicas():
 
 
 def test_picos_angostos_entre_muestras():
-    """La sección áurea encuentra un pico más angosto que la malla."""
+    """La sección áurea encuentra, por intervalo, un pico más angosto que la malla."""
     t = np.linspace(0, 1, 101)                      # paso 0.01
     f = lambda x: 1.0 / ((x - 0.5037) ** 2 + 1e-6)  # noqa: E731  pico de altura 1e6 y ancho ~1e-3
-    t_pk, k_pk = kinematics.curvature_peaks(f, t, f(t))
-    i = np.argmax(k_pk)
-    assert abs(t_pk[i] - 0.5037) < 1e-6
-    assert np.isclose(k_pk[i], 1e6, rtol=1e-6)
+    k_int = kinematics.interval_max_curvature(f, t, f(t))
+    assert k_int.shape == (100,)
+    assert np.argmax(k_int) == 50                   # el pico está en [0.50, 0.51]
+    assert np.isclose(k_int[50], 1e6, rtol=1e-6)
     assert f(t).max() < 0.2 * 1e6                   # la malla sola lo subestimaba
+    # en los demás intervalos f es monótona: el máximo es el mayor extremo
+    ext = np.maximum(f(t)[:-1], f(t)[1:])
+    mask = np.arange(100) != 50
+    assert np.allclose(k_int[mask], ext[mask], rtol=1e-12)
 
 
 def test_max_curvature_incluye_picos_en_nodos_de_hermite():

@@ -18,7 +18,7 @@ Un dron de reparto debe recorrer una lista de *waypoints* en un almacén sin det
 |---|---|
 | `backend/core/` | Núcleo numérico en NumPy, **implementado a mano** (sin `scipy.interpolate`): parametrizaciones, tangentes cardinales/Catmull-Rom, spline de Hermite, spline cúbico natural y sujeto con el algoritmo de Thomas, curvatura, longitud de arco con Simpson, reparametrización con Newton + bisección, perfil de velocidad y estudio de convergencia. |
 | `backend/api/` | API FastAPI: `POST /api/trajectory` y `GET /api/health`. Documentación automática en `/docs`. |
-| `backend/tests/` | 96 tests con pytest. SciPy se usa **solo aquí**, para validar los resultados. |
+| `backend/tests/` | 108 tests con pytest. SciPy se usa **solo aquí**, para validar los resultados. |
 | `frontend/` | Next.js + TypeScript + Tailwind. Plano interactivo en Canvas, dron animado y gráficas con Recharts. |
 | `notebooks/analisis.ipynb` | Análisis para el informe: bases, Hermite vs natural, tensión, parametrización, convergencia y perfil de velocidad. |
 | `docs/figuras/` | Figuras exportadas desde el notebook. |

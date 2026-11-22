@@ -95,24 +95,33 @@ def curvature(d1: np.ndarray, d2: np.ndarray, eps: float = 1e-12, kappa_max: flo
 GOLDEN = (np.sqrt(5.0) - 1.0) / 2.0   # 1/φ ≈ 0.618
 
 
-def curvature_peaks(
+def interval_max_curvature(
     kappa_fn: Callable[[np.ndarray], np.ndarray],
     t: np.ndarray,
     kappa: np.ndarray,
-    iters: int = 60,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Ubica con precisión los máximos de κ(t) que caen entre las muestras.
+    iters: int = 32,
+) -> np.ndarray:
+    """Máximo de κ(t) en cada intervalo [t_i, t_{i+1}] entre muestras consecutivas.
 
-    En curvas cerradas (rapidez paramétrica casi nula) κ tiene picos muy angostos,
-    y una malla uniforme los subestima (hasta en un 99 % con 50 muestras por tramo).
-    Para cada máximo local de la muestra κ_i (κ_i ≥ κ_{i−1} y κ_i ≥ κ_{i+1}) se
-    busca el máximo en [t_{i−1}, t_{i+1}] por **sección áurea**::
+    Sirve para imponer el límite lateral **en toda la curva** y no solo en las
+    muestras: en curvas cerradas κ tiene picos más angostos que la malla, y en
+    Hermite κ salta en los nodos (C¹), así que el máximo puede ser un límite lateral.
+
+    En cada intervalo se busca el máximo por **sección áurea** (todos los intervalos a
+    la vez, vectorizado)::
 
         c = b − (b − a)/φ,   d = a + (b − a)/φ
         si κ(c) > κ(d):  b ← d    si no:  a ← c
 
-    El intervalo se reduce por 1/φ ≈ 0.618 en cada iteración (60 iteraciones ⇒
-    factor 3·10⁻¹³). Todos los picos se refinan a la vez (vectorizado).
+    El intervalo se reduce por 1/φ ≈ 0.618 en cada iteración (32 iteraciones ⇒
+    factor 2·10⁻⁷). Se conserva el mayor valor evaluado durante la búsqueda y se
+    compara con los extremos κ_i y κ_{i+1}::
+
+        κ̂_i = máx( κ_i, κ_{i+1}, máx_{τ evaluado} κ(τ) ) ≈ máx_{t ∈ [t_i, t_{i+1}]} κ(t)
+
+    Supone que κ es unimodal en cada intervalo (los intervalos son una fracción
+    pequeña de cada tramo cúbico); si no lo es, el resultado sigue siendo ≥ que los
+    extremos.
 
     Parámetros
     ----------
@@ -127,44 +136,31 @@ def curvature_peaks(
 
     Retorna
     -------
-    (t_peak, kappa_peak) : np.ndarray de forma (K,)
-        Posición y valor de cada pico (κ_peak ≥ κ de la muestra que lo originó).
+    kappa_int : np.ndarray, forma (N−1,)
 
-    Complejidad: O(K·iters) evaluaciones de κ, con K = número de máximos locales.
+    Complejidad: O(N·iters) evaluaciones de κ.
     """
     t = np.asarray(t, dtype=float)
     kappa = np.asarray(kappa, dtype=float)
-    N = t.shape[0]
-    if N < 2:
-        return np.empty(0), np.empty(0)
-    left = np.concatenate(([-np.inf], kappa[:-1]))
-    right = np.concatenate((kappa[1:], [-np.inf]))
-    idx = np.flatnonzero((kappa >= left) & (kappa >= right))
-    a = t[np.maximum(idx - 1, 0)]
-    b = t[np.minimum(idx + 1, N - 1)]
+    if t.shape[0] < 2:
+        return np.empty(0)
+    a, b = t[:-1].copy(), t[1:].copy()
+    best = np.maximum(kappa[:-1], kappa[1:])
 
     c = b - GOLDEN * (b - a)
     d = a + GOLDEN * (b - a)
     fc, fd = kappa_fn(c), kappa_fn(d)
-    # Mejor punto visto: necesario porque en Hermite κ salta en los nodos (C¹) y el
-    # máximo puede ser un límite lateral que el punto final de la búsqueda no alcanza.
-    best_t = np.where(fc >= fd, c, d)
-    best_k = np.maximum(fc, fd)
+    best = np.maximum(best, np.maximum(fc, fd))
     for _ in range(iters):
         keep_left = fc > fd                       # el máximo está en [a, d]
         a = np.where(keep_left, a, c)
         b = np.where(keep_left, d, b)
         new = np.where(keep_left, b - GOLDEN * (b - a), a + GOLDEN * (b - a))
         f_new = kappa_fn(new)
-        better = f_new > best_k
-        best_t = np.where(better, new, best_t)
-        best_k = np.where(better, f_new, best_k)
+        best = np.maximum(best, f_new)
         c, d = np.where(keep_left, new, d), np.where(keep_left, c, new)
         fc, fd = np.where(keep_left, f_new, fd), np.where(keep_left, fc, f_new)
-    sampled = kappa[idx] >= best_k
-    t_peak = np.where(sampled, t[idx], best_t)
-    kappa_peak = np.maximum(best_k, kappa[idx])
-    return t_peak, kappa_peak
+    return best
 
 
 def physical_accelerations(s: np.ndarray, v: np.ndarray, kappa: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
