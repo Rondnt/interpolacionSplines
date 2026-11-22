@@ -10,7 +10,7 @@ Todos los módulos son funciones puras con NumPy, sin dependencias de FastAPI.
 | `tangents.py` | `cardinal_tangents(t_nodes, P, tension, scheme)`: Catmull-Rom no uniforme (`parabolic`) o clásica (`central`). `exact_tangents`. |
 | `hermite.py` | Bases de Hermite y sus derivadas, `evaluate(t_nodes, P, m, t_eval)` → (p, p′, p″), `second_derivative_jumps`. |
 | `cubic_natural.py` | `thomas_solve`, `natural_second_derivatives`, `clamped_second_derivatives`, `evaluate`, `nodal_slopes`. |
-| `kinematics.py` | `speed`, `acceleration_norm`, `curvature` (acotada, nunca NaN), `physical_accelerations`. |
+| `kinematics.py` | `speed`, `acceleration_norm`, `curvature` (acotada, nunca NaN), `curvature_peaks` (sección áurea), `physical_accelerations`. |
 | `arc_length.py` | `simpson_composite`, `cumulative_arc_length`, `reparametrize_by_arc_length` (Newton + bisección). |
 | `velocity_profile.py` | `curvature_speed_limit`, `longitudinal_limit` (vectorizado con mínimo acumulado), `cumulative_time`. |
 | `trajectory.py` | `compute_trajectory(...)`: encadena todos los pasos (lo usan la API y el notebook). |
@@ -59,6 +59,6 @@ Se responde con **422 y un mensaje claro** en estos casos:
 ## Tests
 
 ```bash
-pytest -v                               # 94 tests
+pytest -v                               # 96 tests
 pytest tests/test_convergence.py -s     # imprime la tabla de errores y órdenes
 ```

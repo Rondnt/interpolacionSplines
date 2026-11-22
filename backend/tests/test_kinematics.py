@@ -70,3 +70,26 @@ def test_aceleraciones_fisicas():
     a_lat, a_long = kinematics.physical_accelerations(s, v, kappa)
     assert np.allclose(a_lat, v**2 * 0.5)
     assert np.allclose(a_long, 1.5)
+
+
+def test_picos_angostos_entre_muestras():
+    """La sección áurea encuentra un pico más angosto que la malla."""
+    t = np.linspace(0, 1, 101)                      # paso 0.01
+    f = lambda x: 1.0 / ((x - 0.5037) ** 2 + 1e-6)  # noqa: E731  pico de altura 1e6 y ancho ~1e-3
+    t_pk, k_pk = kinematics.curvature_peaks(f, t, f(t))
+    i = np.argmax(k_pk)
+    assert abs(t_pk[i] - 0.5037) < 1e-6
+    assert np.isclose(k_pk[i], 1e6, rtol=1e-6)
+    assert f(t).max() < 0.2 * 1e6                   # la malla sola lo subestimaba
+
+
+def test_max_curvature_incluye_picos_en_nodos_de_hermite():
+    """En Hermite κ salta en los nodos: el máximo puede ser el límite por la izquierda."""
+    P = np.array([[0.0, 0.0], [6.0, 0.4], [6.3, 1.2], [1.0, 2.0], [7.0, 3.0]])
+    res = trajectory.compute_trajectory(P, "hermite", 0.0, "centripetal", samples_per_segment=50)
+    sp = trajectory.build_spline(P, "hermite", 0.0, "centripetal")
+    t_fine, _ = trajectory.sample_parameters(sp.t_nodes, 20000)
+    k_ref = sp.curvature(t_fine).max()
+    assert res.max_curvature >= k_ref * (1 - 1e-6)
+    assert res.max_curvature <= k_ref * (1 + 1e-3)
+    assert res.max_curvature > res.curvature.max()  # el pico real cae entre muestras

@@ -9,6 +9,8 @@ La velocidad física del dron es el perfil de ``velocity_profile``.
 
 from __future__ import annotations
 
+from typing import Callable
+
 import numpy as np
 
 #: Curvatura máxima reportada (radio de giro mínimo de 1 µm). Se usa para
@@ -88,6 +90,81 @@ def curvature(d1: np.ndarray, d2: np.ndarray, eps: float = 1e-12, kappa_max: flo
     with np.errstate(divide="ignore", invalid="ignore"):
         kappa = np.where(singular, kappa_max, cross / np.where(singular, 1.0, v) ** 3)
     return np.minimum(kappa, kappa_max)
+
+
+GOLDEN = (np.sqrt(5.0) - 1.0) / 2.0   # 1/φ ≈ 0.618
+
+
+def curvature_peaks(
+    kappa_fn: Callable[[np.ndarray], np.ndarray],
+    t: np.ndarray,
+    kappa: np.ndarray,
+    iters: int = 60,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Ubica con precisión los máximos de κ(t) que caen entre las muestras.
+
+    En curvas cerradas (rapidez paramétrica casi nula) κ tiene picos muy angostos,
+    y una malla uniforme los subestima (hasta en un 99 % con 50 muestras por tramo).
+    Para cada máximo local de la muestra κ_i (κ_i ≥ κ_{i−1} y κ_i ≥ κ_{i+1}) se
+    busca el máximo en [t_{i−1}, t_{i+1}] por **sección áurea**::
+
+        c = b − (b − a)/φ,   d = a + (b − a)/φ
+        si κ(c) > κ(d):  b ← d    si no:  a ← c
+
+    El intervalo se reduce por 1/φ ≈ 0.618 en cada iteración (60 iteraciones ⇒
+    factor 3·10⁻¹³). Todos los picos se refinan a la vez (vectorizado).
+
+    Parámetros
+    ----------
+    kappa_fn : callable
+        t ↦ κ(t), vectorizada.
+    t : np.ndarray, forma (N,)
+        Parámetros de las muestras (crecientes).
+    kappa : np.ndarray, forma (N,)
+        κ en las muestras.
+    iters : int
+        Iteraciones de sección áurea.
+
+    Retorna
+    -------
+    (t_peak, kappa_peak) : np.ndarray de forma (K,)
+        Posición y valor de cada pico (κ_peak ≥ κ de la muestra que lo originó).
+
+    Complejidad: O(K·iters) evaluaciones de κ, con K = número de máximos locales.
+    """
+    t = np.asarray(t, dtype=float)
+    kappa = np.asarray(kappa, dtype=float)
+    N = t.shape[0]
+    if N < 2:
+        return np.empty(0), np.empty(0)
+    left = np.concatenate(([-np.inf], kappa[:-1]))
+    right = np.concatenate((kappa[1:], [-np.inf]))
+    idx = np.flatnonzero((kappa >= left) & (kappa >= right))
+    a = t[np.maximum(idx - 1, 0)]
+    b = t[np.minimum(idx + 1, N - 1)]
+
+    c = b - GOLDEN * (b - a)
+    d = a + GOLDEN * (b - a)
+    fc, fd = kappa_fn(c), kappa_fn(d)
+    # Mejor punto visto: necesario porque en Hermite κ salta en los nodos (C¹) y el
+    # máximo puede ser un límite lateral que el punto final de la búsqueda no alcanza.
+    best_t = np.where(fc >= fd, c, d)
+    best_k = np.maximum(fc, fd)
+    for _ in range(iters):
+        keep_left = fc > fd                       # el máximo está en [a, d]
+        a = np.where(keep_left, a, c)
+        b = np.where(keep_left, d, b)
+        new = np.where(keep_left, b - GOLDEN * (b - a), a + GOLDEN * (b - a))
+        f_new = kappa_fn(new)
+        better = f_new > best_k
+        best_t = np.where(better, new, best_t)
+        best_k = np.where(better, f_new, best_k)
+        c, d = np.where(keep_left, new, d), np.where(keep_left, c, new)
+        fc, fd = np.where(keep_left, f_new, fd), np.where(keep_left, fc, f_new)
+    sampled = kappa[idx] >= best_k
+    t_peak = np.where(sampled, t[idx], best_t)
+    kappa_peak = np.maximum(best_k, kappa[idx])
+    return t_peak, kappa_peak
 
 
 def physical_accelerations(s: np.ndarray, v: np.ndarray, kappa: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

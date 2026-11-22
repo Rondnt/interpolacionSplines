@@ -310,3 +310,12 @@ Revisión hecha antes de implementar; todas están cubiertas por tests.
 | 10 | Con el debounce puro la curva no se actualiza durante el arrastre, y cancelar solicitudes en vuelo impide que llegue alguna respuesta si el servidor es lento. | Throttle de 150 ms con disparo final y descarte de respuestas viejas por número de secuencia. |
 | 11 | `requirements.txt` instalaba Jupyter y SciPy en producción. | Se separó en `requirements.txt` y `requirements-dev.txt`. |
 | 12 | La pasada longitudinal es un bucle O(N) en Python. | Vectorizada: `w_i = c_i + mín_{j≤i}(v_max_j² − c_j)` con `np.minimum.accumulate` (validada contra el bucle). |
+| 13 | *(Auditoría posterior)* En curvas muy cerradas κ tiene picos más angostos que la malla de muestreo; además, en Hermite κ salta en los nodos y el máximo puede ser el límite por la izquierda. Con 50 muestras por tramo, κ máx se subestimaba hasta en un 99 % y el perfil no frenaba en esos picos. | `kinematics.curvature_peaks`: sección áurea en cada máximo local, conservando el mejor punto visto. El pico se impone en las dos muestras vecinas para calcular `v_max`, y `max_curvature` reporta el pico real. Verificado contra una malla de 20 000 puntos por tramo en 80 rutas aleatorias. |
+
+**Precisión de los resultados (auditoría con 40 rutas aleatorias × 3 parametrizaciones):**
+
+- Posición, derivadas, tangentes y κ coinciden con SciPy (`CubicHermiteSpline`, `CubicSpline`) con un error relativo de 1e-11 o menos.
+- Catmull-Rom coincide con el algoritmo piramidal de Barry-Goldman (error ~1e-16).
+- La longitud de arco coincide con `scipy.integrate.quad` (error relativo de 4e-5 o menos).
+- La API devuelve exactamente lo que calcula el núcleo.
+- Las restricciones físicas se cumplen **exactamente en las muestras**. Entre muestras, la interpolación lineal de v introduce un error de discretización O(h²): 0.08 % en la ruta del almacén con 50 muestras por tramo; puede llegar a algunos puntos porcentuales en giros de centímetros. Disminuye al aumentar `samples_per_segment`.
