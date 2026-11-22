@@ -8,6 +8,8 @@ Un dron de reparto debe recorrer una lista de *waypoints* en un almacén sin det
 2. calcula su velocidad, aceleración y curvatura;
 3. obtiene un **perfil de velocidad físicamente factible**: el dron frena antes de las curvas cerradas y acelera en las rectas.
 
+**Demo en línea:** https://interpolacion-splines.vercel.app (la API vive en https://drone-splines-api.onrender.com/docs). El plan gratuito de Render suspende el backend cuando no se usa: la primera carga puede tardar unos 30–50 s.
+
 ![Simulador](docs/figuras/app_simulador.png)
 
 ## Qué incluye
@@ -103,6 +105,9 @@ Con derivadas exactas se alcanza el orden teórico 4. Con derivadas estimadas, l
 ![Convergencia](docs/figuras/06_convergencia.png)
 
 ## Despliegue
+
+Desplegado en https://interpolacion-splines.vercel.app (frontend) y https://drone-splines-api.onrender.com (backend).
+
 
 - **Backend en Render.** El archivo `render.yaml` define el servicio (raíz `backend/`, `uvicorn api.main:app --host 0.0.0.0 --port $PORT`). Hay que configurar `ALLOWED_ORIGINS` con el dominio de Vercel.
 - **Frontend en Vercel.** El *Root Directory* es `frontend/` y la variable de entorno `NEXT_PUBLIC_API_URL` debe apuntar a la URL de Render.

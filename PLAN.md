@@ -267,12 +267,12 @@ Las docs automáticas quedan disponibles en `/docs`.
   6. Convergencia log-log con tabla de errores.
   7. Perfil de velocidad y tiempo estimado.
 - [x] Exportar figuras a `docs/figuras/`.
-- [x] README final: descripción, capturas, instrucciones y explicación del método. (El enlace a la demo se agrega después del deploy.)
+- [x] README final: descripción, capturas, instrucciones y explicación del método. Demo: https://interpolacion-splines.vercel.app
 
 ### Fase 11 — Deploy
-- [ ] Backend en Render (`uvicorn api.main:app --host 0.0.0.0 --port $PORT`). Configuración lista en `render.yaml`; falta crear el servicio.
-- [ ] Frontend en Vercel con `NEXT_PUBLIC_API_URL` (Root Directory: `frontend/`).
-- [ ] Configurar CORS con el dominio de Vercel (variable `ALLOWED_ORIGINS` en Render).
+- [x] Backend en Render (`uvicorn api.main:app --host 0.0.0.0 --port $PORT`) con `render.yaml`: https://drone-splines-api.onrender.com
+- [x] Frontend en Vercel con `NEXT_PUBLIC_API_URL` (Root Directory: `frontend/`): https://interpolacion-splines.vercel.app
+- [x] Configurar CORS con el dominio de Vercel (variable `ALLOWED_ORIGINS` en Render).
 
 ---
 
