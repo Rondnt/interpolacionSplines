@@ -294,7 +294,7 @@ Las docs automáticas quedan disponibles en `/docs`.
 
 ## 8. Decisiones y correcciones al plan
 
-Revisión hecha antes de implementar; todas están cubiertas por tests.
+Los puntos 1 a 12 salen de la revisión previa a la implementación; del 13 en adelante, de auditorías posteriores. Los del núcleo y la API tienen tests; los del frontend (7 y 10) se probaron a mano en el navegador.
 
 | # | Problema en el plan original | Decisión |
 |---|---|---|
@@ -311,7 +311,8 @@ Revisión hecha antes de implementar; todas están cubiertas por tests.
 | 11 | `requirements.txt` instalaba Jupyter y SciPy en producción. | Se separó en `requirements.txt` y `requirements-dev.txt`. |
 | 12 | La pasada longitudinal es un bucle O(N) en Python. | Vectorizada: `w_i = c_i + mín_{j≤i}(v_max_j² − c_j)` con `np.minimum.accumulate` (validada contra el bucle). |
 | 13 | *(Auditoría posterior)* En curvas muy cerradas κ tiene picos más angostos que la malla de muestreo; además, en Hermite κ salta en los nodos y el máximo puede ser el límite por la izquierda. Con 50 muestras por tramo, κ máx se subestimaba hasta en un 99 % y el perfil no frenaba en esos picos. | `kinematics.interval_max_curvature`: máximo de κ en **cada intervalo** entre muestras con sección áurea, conservando el mejor punto visto. Cada muestra usa el peor κ de sus dos intervalos vecinos, y `max_curvature` reporta el pico real. |
-| 14 | *(Auditoría posterior)* El límite lateral se cumplía solo en las muestras. Como v se interpola linealmente entre ellas y √(a_lat/κ) es curva, se superaba a_lat entre muestras (0.08 % en la ruta del almacén y hasta 65 % en giros de centímetros). | Con el máximo de κ por intervalo, si v_i y v_{i+1} cumplen v ≤ √(a_lat/κ̂) también lo cumple cualquier interpolación lineal entre ellas: **la garantía vale en toda la curva**. Además, la longitud de arco usa Simpson con 8 subintervalos por muestra (antes 2), porque en esquinas casi exactas el integrando ‖p′‖ cambia muy rápido. Costo: unos 14 ms por cálculo con 8 waypoints. |
+| 14 | *(Auditoría posterior)* El límite lateral se cumplía solo en las muestras: entre ellas se superaba a_lat en 0.08 % en la ruta del almacén. | Máximo de κ por intervalo; si v_i y v_{i+1} cumplen v ≤ √(a_lat/κ̂), también lo cumple cualquier valor intermedio. La longitud de arco usa 8 subintervalos por intervalo. |
+| 15 | *(Regresión del punto 14)* El límite de un pico angosto se aplicaba a dos intervalos completos de muestreo y sobrestimaba el tiempo: con tensión 1 daba 91 s en vez de 24.8 s, y con tensión 0.9, un 3.6 % de más. | `trajectory.feasible_profile` calcula el perfil en una malla interna densificada (t* ± h·2⁻ʲ) en cada pico y cada nodo. Con tensión 1 da 24.832 s frente a 24.843 s analíticos (Σ 2√(d/a)). |
 
 **Precisión de los resultados (auditoría con 40 rutas aleatorias × 3 parametrizaciones):**
 
@@ -319,5 +320,7 @@ Revisión hecha antes de implementar; todas están cubiertas por tests.
 - Catmull-Rom coincide con el algoritmo piramidal de Barry-Goldman (error ~1e-16).
 - La longitud de arco coincide con `scipy.integrate.quad` (error relativo de 4e-5 o menos).
 - La API devuelve exactamente lo que calcula el núcleo.
-- Las restricciones físicas se cumplen **en toda la curva, también entre muestras**. En la ruta del almacén el exceso de a_lat medido en una malla 40 veces más fina es 0 (2·10⁻¹⁶). En 360 combinaciones aleatorias (3 métodos × 3 parametrizaciones × tensiones 0/0.5/0.9) el peor caso es 0.15 %: una esquina casi exacta con tensión 0.9, recorrida a 2.5 mm/s en un radio de 3 µm. Ese valor queda al nivel de la precisión de la propia malla de comprobación.
+- El límite lateral se cumple en la malla interna también entre puntos: el peor exceso en 200 casos es 5·10⁻⁹ (relativo). La app dibuja v interpolada entre muestras, que es solo una visualización de ese perfil.
+- El tiempo estimado con 50 muestras por tramo nunca queda por debajo de la referencia (5000 muestras por tramo) y la supera en 1.3 % (mediana) y 3.2 % (peor caso) sobre 240 casos.
 - κ máx coincide con una malla de 20 000 puntos por tramo (o la supera cuando esa malla tampoco ve el pico).
+- La centrípeta no formó bucles dentro de ningún tramo en 400 rutas aleatorias (la uniforme, 5). Con cualquier parametrización puede haber un giro muy cerrado **en un waypoint** si la ruta casi se devuelve.

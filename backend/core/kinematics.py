@@ -100,7 +100,7 @@ def interval_max_curvature(
     t: np.ndarray,
     kappa: np.ndarray,
     iters: int = 32,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     """Máximo de κ(t) en cada intervalo [t_i, t_{i+1}] entre muestras consecutivas.
 
     Sirve para imponer el límite lateral **en toda la curva** y no solo en las
@@ -136,31 +136,36 @@ def interval_max_curvature(
 
     Retorna
     -------
-    kappa_int : np.ndarray, forma (N−1,)
+    (kappa_int, t_int) : np.ndarray de forma (N−1,)
+        Máximo de κ en cada intervalo y parámetro donde se alcanza.
 
     Complejidad: O(N·iters) evaluaciones de κ.
     """
     t = np.asarray(t, dtype=float)
     kappa = np.asarray(kappa, dtype=float)
     if t.shape[0] < 2:
-        return np.empty(0)
+        return np.empty(0), np.empty(0)
     a, b = t[:-1].copy(), t[1:].copy()
     best = np.maximum(kappa[:-1], kappa[1:])
+    best_t = np.where(kappa[:-1] >= kappa[1:], a, b)
 
     c = b - GOLDEN * (b - a)
     d = a + GOLDEN * (b - a)
     fc, fd = kappa_fn(c), kappa_fn(d)
-    best = np.maximum(best, np.maximum(fc, fd))
+    for x, fx in ((c, fc), (d, fd)):
+        best_t = np.where(fx > best, x, best_t)
+        best = np.maximum(best, fx)
     for _ in range(iters):
         keep_left = fc > fd                       # el máximo está en [a, d]
         a = np.where(keep_left, a, c)
         b = np.where(keep_left, d, b)
         new = np.where(keep_left, b - GOLDEN * (b - a), a + GOLDEN * (b - a))
         f_new = kappa_fn(new)
+        best_t = np.where(f_new > best, new, best_t)
         best = np.maximum(best, f_new)
         c, d = np.where(keep_left, new, d), np.where(keep_left, c, new)
         fc, fd = np.where(keep_left, f_new, fd), np.where(keep_left, fc, f_new)
-    return best
+    return best, best_t
 
 
 def physical_accelerations(s: np.ndarray, v: np.ndarray, kappa: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

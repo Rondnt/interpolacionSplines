@@ -7,7 +7,7 @@ Encadena los módulos del núcleo en el mismo orden que el modelo matemático:
 3. Muestreo:          N puntos por tramo, u ∈ [0, 1), más el último nodo
 4. Cinemática:        ‖p'‖, ‖p''‖ y κ; máximo de κ en cada intervalo entre muestras (sección áurea)
 5. Longitud de arco:  s(t) con Simpson compuesto
-6. Velocidad:         v_max por curvatura (válido en toda la curva) y perfil con límite longitudinal
+6. Velocidad:         v_max por curvatura y perfil longitudinal en una malla densificada en los picos
 7. Tiempo:            t(s) acumulado y tiempo total
 
 La usan la API (``api/main.py``) y el notebook del informe.
@@ -56,7 +56,7 @@ class TrajectoryResult:
     speed: np.ndarray         # (N,)  ‖p'(t)‖ (paramétrica)
     acceleration: np.ndarray  # (N,)  ‖p''(t)‖ (paramétrica)
     curvature: np.ndarray     # (N,)  κ [1/m] en las muestras
-    v_max: np.ndarray         # (N,)  límite por curvatura [m/s], válido también entre muestras
+    v_max: np.ndarray         # (N,)  límite por curvatura [m/s]
     v_profile: np.ndarray     # (N,)  perfil factible [m/s]
     time: np.ndarray          # (N,)  tiempo acumulado [s]
     tangents: np.ndarray      # (n+1, 2) tangentes en los nodos
@@ -146,6 +146,82 @@ def sample_parameters(t_nodes: np.ndarray, samples_per_segment: int) -> tuple[np
     return t, knots_index
 
 
+@dataclass(frozen=True)
+class Profile:
+    """Perfil de velocidad sobre la malla interna (contiene todas las muestras)."""
+
+    t: np.ndarray
+    s: np.ndarray
+    v_max: np.ndarray
+    v: np.ndarray
+    time: np.ndarray
+    max_curvature: float
+
+
+def _interval_envelope(spline: Spline, t: np.ndarray, iters: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Devuelve (κ̂_j, t̂_j, κ_env) con κ_env,i = máx(κ̂_{i−1}, κ̂_i). Complejidad: O(N·iters)."""
+    kappa_int, t_int = kinematics.interval_max_curvature(spline.curvature, t, spline.curvature(t), iters)
+    env = np.maximum(np.concatenate((kappa_int[:1], kappa_int)), np.concatenate((kappa_int, kappa_int[-1:])))
+    return kappa_int, t_int, env
+
+
+def feasible_profile(
+    spline: Spline,
+    t: np.ndarray,
+    v_cruise: float,
+    a_lat_max: float,
+    a_long_max: float,
+    levels: int = 12,
+) -> Profile:
+    """Perfil de velocidad calculado en una malla interna densificada en los picos de κ.
+
+    1. Se ubican los máximos locales de κ por intervalo y se agregan, alrededor de cada
+       pico y de cada nodo t*, los puntos graduados::
+
+           t* ± h·2^{−j},   j = 0..levels,   h = separación local entre muestras
+
+    2. En cada intervalo de esa malla se usa κ̂_j = máx κ, y en cada punto
+       κ_env,i = máx(κ̂_{i−1}, κ̂_i). Si v_i y v_{i+1} cumplen v ≤ √(a_lat/κ̂_i), toda
+       interpolación lineal de v (o de v²) en el intervalo también lo cumple.
+
+    Sin la densificación, el límite de un pico muy angosto (por ejemplo las esquinas
+    con tensión c = 1) se aplicaría a dos intervalos completos de muestreo y el tiempo
+    quedaría muy sobrestimado. Con ella, solo se aplica a un entorno de ancho h·2^{−levels}.
+
+    Parámetros
+    ----------
+    spline : Spline
+    t : np.ndarray, forma (N,)
+        Parámetros de las muestras.
+    v_cruise, a_lat_max, a_long_max : float
+        Límites físicos.
+    levels : int
+        Niveles de densificación.
+
+    Retorna
+    -------
+    Profile
+
+    Complejidad: O((N + K·levels)·iters), con K = número de picos y nodos.
+    """
+    kappa_int, t_int, _ = _interval_envelope(spline, t, iters=20)
+    prev = np.concatenate(([-np.inf], kappa_int[:-1]))
+    nxt = np.concatenate((kappa_int[1:], [-np.inf]))
+    is_peak = (kappa_int >= prev) & (kappa_int >= nxt) & (kappa_int > 0)
+    centers = np.concatenate((spline.t_nodes, t_int[is_peak]))
+    j = np.clip(np.searchsorted(t, centers, side="right") - 1, 0, t.shape[0] - 2)
+    offsets = (t[j + 1] - t[j])[:, None] * 0.5 ** np.arange(levels + 1)[None, :]
+    extra = np.concatenate((centers, (centers[:, None] - offsets).ravel(), (centers[:, None] + offsets).ravel()))
+    grid = np.union1d(t, extra[(extra > t[0]) & (extra < t[-1])])
+
+    _, _, env = _interval_envelope(spline, grid, iters=12)
+    s = arc_length.cumulative_arc_length(grid, spline.speed, n_sub=8)
+    v_max = velocity_profile.curvature_speed_limit(env, v_cruise, a_lat_max)
+    v = velocity_profile.longitudinal_limit(v_max, s, a_long_max)
+    time = velocity_profile.cumulative_time(s, v, a_long_max)
+    return Profile(grid, s, v_max, v, time, float(env.max()))
+
+
 def compute_trajectory(
     waypoints: np.ndarray,
     method: Method = "hermite",
@@ -191,18 +267,9 @@ def compute_trajectory(
     accel = kinematics.acceleration_norm(d2)
     kappa = kinematics.curvature(d1, d2)
 
-    # Límite lateral garantizado en toda la curva, no solo en las muestras:
-    #   κ̂_j = máx κ en [t_j, t_{j+1}]   y   κ_env,i = máx(κ̂_{i−1}, κ̂_i).
-    # Si v_i y v_{i+1} cumplen v ≤ √(a_lat/κ̂_i), cualquier interpolación lineal entre
-    # ellas (de v o de v²) también lo cumple en todo el intervalo, porque nunca supera
-    # al mayor de sus extremos.
-    kappa_int = kinematics.interval_max_curvature(spline.curvature, t, kappa)
-    kappa_env = np.maximum(np.concatenate((kappa_int[:1], kappa_int)), np.concatenate((kappa_int, kappa_int[-1:])))
-
-    s = arc_length.cumulative_arc_length(t, spline.speed, n_sub=8)
-    v_max = velocity_profile.curvature_speed_limit(kappa_env, v_cruise, a_lat_max)
-    v = velocity_profile.longitudinal_limit(v_max, s, a_long_max)
-    time = velocity_profile.cumulative_time(s, v, a_long_max)
+    prof = feasible_profile(spline, t, v_cruise, a_lat_max, a_long_max)
+    idx = np.searchsorted(prof.t, t)      # las muestras pertenecen a la malla interna
+    s, v_max, v, time = prof.s[idx], prof.v_max[idx], prof.v[idx], prof.time[idx]
 
     return TrajectoryResult(
         points=points,
@@ -219,5 +286,5 @@ def compute_trajectory(
         t_nodes=spline.t_nodes,
         length=float(s[-1]),
         time_estimate=float(time[-1]),
-        max_curvature=float(kappa_env.max()),
+        max_curvature=prof.max_curvature,
     )

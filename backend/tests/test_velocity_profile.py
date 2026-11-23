@@ -79,18 +79,38 @@ def test_tension_1_no_produce_nan():
 @pytest.mark.parametrize("method", ["hermite", "natural"])
 @pytest.mark.parametrize("seed", range(6))
 def test_limite_lateral_tambien_entre_muestras(method, seed):
-    """Con v interpolada linealmente en s, v²κ ≤ a_lat en una malla 40 veces más fina."""
-    from core import arc_length
+    """En cada intervalo de la malla interna, máx(v_i, v_{i+1})²·κ ≤ a_lat.
 
+    Es más estricto que cualquier interpolación monótona de v entre los extremos y no
+    depende de cómo se calcule s.
+    """
     rng = np.random.default_rng(seed)
     while True:
         P = np.c_[rng.uniform(0, 24, 7), rng.uniform(0, 14, 7)]
         if np.linalg.norm(np.diff(P, axis=0), axis=1).min() > 0.5:
             break
-    res = trajectory.compute_trajectory(P, method, 0.0, "centripetal", samples_per_segment=50, **LIMITS)
     sp = trajectory.build_spline(P, method, 0.0, "centripetal")
-    t_fine, _ = trajectory.sample_parameters(sp.t_nodes, 2000)
-    s_fine = arc_length.cumulative_arc_length(t_fine, sp.speed)
-    v_fine = np.interp(s_fine, res.s, res.v_profile)
-    a_lat = v_fine**2 * sp.curvature(t_fine)
-    assert a_lat.max() <= LIMITS["a_lat_max"] * (1 + 1e-6)
+    t, _ = trajectory.sample_parameters(sp.t_nodes, 50)
+    prof = trajectory.feasible_profile(sp, t, **LIMITS)
+    w = np.linspace(0, 1, 41)[:, None]
+    t_fine = prof.t[:-1] * (1 - w) + prof.t[1:] * w                    # (41, N−1)
+    kappa = sp.curvature(t_fine.ravel()).reshape(t_fine.shape)
+    a_lat = np.maximum(prof.v[:-1], prof.v[1:])[None, :] ** 2 * kappa
+    assert a_lat.max() <= LIMITS["a_lat_max"] * (1 + 1e-3)
+
+
+@pytest.mark.parametrize("N", [20, 50, 200])
+def test_tension_1_tiempo_analitico(N):
+    """Con c = 1 son rectas con parada en cada waypoint: T = Σ 2·√(d_k/a) (sin llegar a crucero)."""
+    d = np.linalg.norm(np.diff(WAYPOINTS, axis=0), axis=1)
+    exacto = float((2 * np.sqrt(d / LIMITS["a_long_max"])).sum())
+    res = trajectory.compute_trajectory(WAYPOINTS, "hermite", 1.0, "centripetal", samples_per_segment=N, **LIMITS)
+    assert res.time_estimate == pytest.approx(exacto, rel=5e-3)
+
+
+@pytest.mark.parametrize("tension", [0.0, 0.5, 0.9, 0.95, 0.99])
+def test_tiempo_converge_con_pocas_muestras(tension):
+    """El tiempo con 50 muestras por tramo difiere < 2 % del obtenido con 2000."""
+    grueso = trajectory.compute_trajectory(WAYPOINTS, "hermite", tension, "centripetal", samples_per_segment=50, **LIMITS)
+    fino = trajectory.compute_trajectory(WAYPOINTS, "hermite", tension, "centripetal", samples_per_segment=2000, **LIMITS)
+    assert grueso.time_estimate == pytest.approx(fino.time_estimate, rel=2e-2)

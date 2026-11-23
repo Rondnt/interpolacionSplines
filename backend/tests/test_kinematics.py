@@ -76,7 +76,8 @@ def test_picos_angostos_entre_muestras():
     """La sección áurea encuentra, por intervalo, un pico más angosto que la malla."""
     t = np.linspace(0, 1, 101)                      # paso 0.01
     f = lambda x: 1.0 / ((x - 0.5037) ** 2 + 1e-6)  # noqa: E731  pico de altura 1e6 y ancho ~1e-3
-    k_int = kinematics.interval_max_curvature(f, t, f(t))
+    k_int, t_int = kinematics.interval_max_curvature(f, t, f(t))
+    assert abs(t_int[50] - 0.5037) < 1e-6
     assert k_int.shape == (100,)
     assert np.argmax(k_int) == 50                   # el pico está en [0.50, 0.51]
     assert np.isclose(k_int[50], 1e6, rtol=1e-6)
